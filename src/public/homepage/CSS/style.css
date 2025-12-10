@@ -29,6 +29,8 @@
     padding: 0;
     box-sizing: border-box;
     font-family: 'Poppins', sans-serif;
+    overflow: hideen;
+    position: relative;
 }
 
 
@@ -1238,6 +1240,7 @@ html,body {
   overflow: hidden;
   padding: 60px 0;
   margin-top: 200px;
+  overflow: hidden;
 }
 
 /* GIANT BG WORD */
