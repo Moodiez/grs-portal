@@ -87,6 +87,27 @@ app.get("/api/assignments", (req, res) => {
   res.json(read("assignments.json"));
 });
 
+===================== SUBMISSIONS ===================== */
+app.post("/api/submit-assignment", (req, res) => {
+  const { userId, assignmentId, content } = req.body;
+  const submissions = read("submissions.json");
+
+  submissions[assignmentId] ??= [];
+  submissions[assignmentId].push({
+    userId,
+    content,
+    date: new Date().toISOString()
+  });
+
+  write("submissions.json", submissions);
+  res.json({ success: true });
+});
+
+app.get("/api/submissions/:assignmentId", (req, res) => {
+  const submissions = read("submissions.json");
+  res.json(submissions[req.params.assignmentId] || []);
+});
+
 /*===========NEWS===========*/
 app.get("/api/news", (req, res) => {
   res.json(read("news.json"));
