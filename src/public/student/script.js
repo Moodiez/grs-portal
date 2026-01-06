@@ -1,28 +1,52 @@
-// ================== ELEMENTS ==================
-const yearSpan = document.getElementById("y");
-if (yearSpan) yearSpan.textContent = new Date().getFullYear();
+/* ===================== CONFIG ===================== */
+const API = "http://localhost:3000/api";
 
+/* ===================== AUTH ===================== */
+const user = JSON.parse(localStorage.getItem("user"));
+const USER_ID = user?.id;
+
+if (!USER_ID) {
+  window.location.href = "login.html";
+}
+
+/* ===================== ELEMENTS ===================== */
+const yearSpan = document.getElementById("y");
 const sidebar = document.getElementById("sidebar");
 const menuBtn = document.getElementById("menuBtn");
 const overlay = document.getElementById("overlay");
 const menuLinks = document.querySelectorAll("nav a");
 const pages = document.querySelectorAll(".page-section");
 
-// ================== GLOBAL STATE ==================
-const user = JSON.parse(localStorage.getItem("user"));
-const USER_ID = user?.id;
-const API = "http://localhost:3000/api";
+const userName = document.getElementById("userName");
+const userAvatar = document.getElementById("userAvatar");
+
+/* Schedule */
+const monthYear = document.getElementById("monthYear");
+const calendarDays = document.getElementById("calendarDays");
+const plansList = document.getElementById("plansList");
+const planModal = document.getElementById("planModal");
+const modalDate = document.getElementById("modalDate");
+const planInput = document.getElementById("planInput");
+const savePlan = document.getElementById("savePlan");
+const deletePlan = document.getElementById("deletePlan");
+const prevMonth = document.getElementById("prevMonth");
+const nextMonth = document.getElementById("nextMonth");
+
+/* ===================== STATE ===================== */
 let courses = [];
+let schedDate = new Date();
+let activeDate = null;
+const plans = JSON.parse(localStorage.getItem("plans") || "{}");
 
-if (!USER_ID) window.location.href = "login.html";
+/* ===================== INIT ===================== */
+yearSpan.textContent = new Date().getFullYear();
+userName.textContent = user.name || "Student";
+userAvatar.style.backgroundImage = "url('https://i.pravatar.cc/40')";
+userAvatar.style.backgroundSize = "cover";
 
-// ================== SIDEBAR ==================
+/* ===================== SIDEBAR ===================== */
 menuBtn?.addEventListener("click", toggleSidebar);
 overlay?.addEventListener("click", closeSidebar);
-
-window.addEventListener("resize", () => {
-  if (window.innerWidth >= 1024) closeSidebar();
-});
 
 function toggleSidebar() {
   sidebar.classList.toggle("-translate-x-full");
@@ -34,21 +58,20 @@ function closeSidebar() {
   overlay.classList.add("hidden");
 }
 
-
-// ================== NAVIGATION ==================
+/* ===================== NAVIGATION ===================== */
 menuLinks.forEach(link => {
   link.addEventListener("click", async e => {
     e.preventDefault();
     const page = link.dataset.page;
-    await showPage(page);
     highlightNav(link);
     closeSidebar();
+    await showPage(page);
   });
 });
 
 function highlightNav(active) {
   menuLinks.forEach(l => l.classList.remove("bg-[#1C1820]", "text-white"));
-  active?.classList.add("bg-[#1C1820]", "text-white");
+  active.classList.add("bg-[#1C1820]", "text-white");
 }
 
 async function showPage(id) {
@@ -62,13 +85,13 @@ async function showPage(id) {
   if (id === "schedule") loadSchedule();
 }
 
-// ================== LOAD COURSES ==================
+/* ===================== DATA ===================== */
 async function loadCourses() {
   const res = await fetch(`${API}/courses`);
   courses = await res.json();
 }
 
-// ================== DASHBOARD ==================
+/* ===================== DASHBOARD ===================== */
 async function loadDashboard() {
   const res = await fetch(`${API}/my-courses/${USER_ID}`);
   const myCourses = await res.json();
@@ -77,100 +100,84 @@ async function loadDashboard() {
   document.getElementById("totalCoursesCount").textContent = courses.length;
 
   const container = document.getElementById("continueCourses");
-  if (!container) return;
-
   container.innerHTML = "";
 
   if (!myCourses.length) {
-    container.innerHTML = `<p class="text-gray-500 italic">No courses yet.</p>`;
+    container.innerHTML = `<p class="italic text-gray-500">No courses yet.</p>`;
     return;
   }
 
-  localStorage.setItem("lastCourse", myCourses[0].id);
-
   myCourses.slice(0, 2).forEach(course => {
-    container.innerHTML += `
-      <div class="bg-white p-4 rounded-xl shadow">
-        <h4 class="font-semibold">${course.title}</h4>
-        <p class="text-sm text-gray-600">${course.description}</p>
-        <p class="text-xs text-gray-500 mt-1">Progress: 0%</p>
-        <button class="mt-2 text-blue-600 text-sm" onclick="showPage('courses')">
-          Continue
-        </button>
-      </div>`;
+    const card = document.createElement("div");
+    card.className = "bg-white p-4 rounded-xl shadow";
+    card.innerHTML = `
+      <h4 class="font-semibold">${course.title}</h4>
+      <p class="text-sm text-gray-600">${course.description}</p>
+    `;
+    container.appendChild(card);
   });
 }
 
-// ================== COURSE CARD ==================
-function createCourseCard(course, mode = "enroll") {
+/* ===================== COURSES ===================== */
+function createCourseCard(course, enrolled) {
   const card = document.createElement("div");
   card.className = "bg-white p-4 rounded-xl shadow";
+
+  const btn = document.createElement("button");
+  btn.textContent = enrolled ? "Unenroll" : "Enroll";
+  btn.className = "mt-3 px-3 py-1 border rounded";
+
+  btn.onclick = async () => {
+    if (enrolled) {
+      await unenrollCourse(course.id);
+    } else {
+      await enrollCourse(course.id);
+    }
+  };
 
   card.innerHTML = `
     <h3 class="font-semibold">${course.title}</h3>
     <p class="text-sm text-gray-600">${course.description}</p>
   `;
-
-  const btn = document.createElement("button");
-  btn.textContent = mode === "unenroll" ? "Unenroll" : "Enroll";
-  btn.className = "mt-3 px-3 py-1 border rounded";
-
-  btn.onclick = () =>
-    mode === "unenroll"
-      ? unenrollCourse(course.id)
-      : enrollCourse(course.id);
-
   card.appendChild(btn);
+
   return card;
 }
 
-
-// ================== MY COURSES ==================
 async function loadMyCourses() {
   const section = document.getElementById("courses");
   const res = await fetch(`${API}/my-courses/${USER_ID}`);
   const myCourses = await res.json();
 
-  if (!myCourses.length) {
-    section.innerHTML = `
-      <section class="content-box text-center">
-        <h2 class="text-xl font-semibold">My Courses</h2>
-        <p class="opacity-70 mt-4">You're not enrolled in any courses yet.</p>
-      </section>`;
-    return;
-  }
-
   section.innerHTML = `
     <section class="content-box">
       <h2 class="text-xl font-semibold mb-4">My Courses</h2>
       <div id="myCoursesList" class="grid md:grid-cols-2 gap-4"></div>
-    </section>`;
+    </section>
+  `;
 
   const list = document.getElementById("myCoursesList");
-  myCourses.forEach(course =>
-    list.appendChild(createCourseCard(course, "unenroll"))
-  );
+  myCourses.forEach(c => list.appendChild(createCourseCard(c, true)));
 }
 
-// ================== ENROLL ==================
 async function loadEnroll() {
   const section = document.getElementById("enroll");
-  section.innerHTML = `
-    <section class="content-box">
-      <h2 class="text-xl font-semibold mb-4">Enroll in Courses</h2>
-      <div id="enrollCoursesList" class="grid md:grid-cols-2 gap-4"></div>
-    </section>`;
-
-  const list = document.getElementById("enrollCoursesList");
-
   const res = await fetch(`${API}/my-courses/${USER_ID}`);
   const myCourses = await res.json();
   const myIds = new Set(myCourses.map(c => c.id));
 
-  courses
-    .filter(c => !myIds.has(c.id))
-    .forEach(course => list.appendChild(createCourseCard(course)));
+  section.innerHTML = `
+    <section class="content-box">
+      <h2 class="text-xl font-semibold mb-4">Enroll in Courses</h2>
+      <div id="enrollCoursesList" class="grid md:grid-cols-2 gap-4"></div>
+    </section>
+  `;
+
+  const list = document.getElementById("enrollCoursesList");
+  courses.filter(c => !myIds.has(c.id))
+    .forEach(c => list.appendChild(createCourseCard(c, false)));
 }
+
 async function enrollCourse(courseId) {
   await fetch(`${API}/enroll`, {
     method: "POST",
@@ -180,46 +187,63 @@ async function enrollCourse(courseId) {
   await loadMyCourses();
   await loadEnroll();
 }
-async function unenrollCourse(courseId) {
-  const res = await fetch(`${API}/my-courses/${USER_ID}`);
-  const myCourses = await res.json();
-  const updatedCourses = myCourses.filter(c => c.id !== courseId);
 
-  // Simulate unenrollment by rewriting enrollments
-  const enrollments = {};
-  enrollments[USER_ID] = updatedCourses.map(c => c.id);
+async function unenrollCourse(courseId) {
   await fetch(`${API}/unenroll`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(enrollments)
+    body: JSON.stringify({ userId: USER_ID, courseId })
   });
   await loadMyCourses();
   await loadEnroll();
 }
 
-// ================== ASSIGNMENTS ==================
+/* ===================== ASSIGNMENTS ===================== */
 async function loadAssignments() {
   const res = await fetch(`${API}/assignments`);
-  const apiAssignments = await res.json();
-
+  const assignments = await res.json();
   const list = document.getElementById("assignmentsList");
- 
-  const assignments = JSON.parse(localStorage.getItem("teacherAssignments") || "[]")
+
   list.innerHTML = assignments.length
     ? assignments.map(a => `
       <div class="bg-white p-4 rounded shadow">
         <h3 class="font-semibold">${a.title}</h3>
         <p class="text-sm">${a.description}</p>
-      </div>`).join("")
-    : `<p class="italic text-gray-500">No assignments posted.</p>`;
+      </div>
+    `).join("")
+    : `<p class="italic text-gray-500">No assignments.</p>`;
+}
+
+const section = document.getElementById("assignments");
+  section.innerHTML = `
+    <section class="content-box">
+      <h2 class="text-xl font-semibold mb-4">Assignments</h2>
+      <div id="assignmentsList" class="space-y-4"></div>
+    </section>
+  `;    
+  assignments.forEach(a => {
+    const div = document.createElement("div");
+    div.className = "p-4 border rounded"; 
+    div.innerHTML = `
+      <h3 class="font-semibold">${a.title}</h3>
+      <p>${a.description}</p>   
+      <button onclick="submitAssignment(${a.id})" class="mt-2 px-4 py-2 bg-blue-500 text-white rounded">Submit</button>
+    `;
+    document.getElementById("assignmentsList").appendChild(div);
+  });       
+async function submitAssignment(assignmentId) {
+  const content = prompt("Enter your assignment submission:");
+  if (!content) return; 
+  await fetch(`${API}/submit-assignment`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ userId: USER_ID, assignmentId, content })
+  });
+  alert("Assignment submitted successfully!");
 }
 
 
-// ================== SCHEDULE ==================
-let schedDate = new Date();
-let activeDate = null;
-const plans = JSON.parse(localStorage.getItem("plans") || "{}");
-
+/* ===================== SCHEDULE ===================== */
 function loadSchedule() {
   renderCalendar();
   renderPlans();
@@ -228,31 +252,32 @@ function loadSchedule() {
 function renderCalendar() {
   const y = schedDate.getFullYear();
   const m = schedDate.getMonth();
-  const today = new Date().toDateString();
   const first = new Date(y, m, 1).getDay();
   const days = new Date(y, m + 1, 0).getDate();
 
   monthYear.textContent = schedDate.toLocaleString("default", { month: "long", year: "numeric" });
   calendarDays.innerHTML = "";
 
-  for (let i = 0; i < first; i++) calendarDays.innerHTML += "<div></div>";
+  for (let i = 0; i < first; i++) calendarDays.appendChild(document.createElement("div"));
 
   for (let d = 1; d <= days; d++) {
     const key = new Date(y, m, d).toISOString().split("T")[0];
-    const isToday = new Date(y, m, d).toDateString() === today;
+    const cell = document.createElement("div");
 
-    calendarDays.innerHTML += `
-      <div class="p-2 text-sm rounded cursor-pointer text-center
-      ${isToday ? "bg-green-200" : plans[key] ? "bg-blue-100" : "hover:bg-gray-100"}"
-      onclick="openPlan('${key}')">${d}</div>`;
+    cell.textContent = d;
+    cell.className = "p-2 text-sm rounded cursor-pointer text-center hover:bg-gray-100";
+    if (plans[key]) cell.classList.add("bg-blue-100");
+
+    cell.onclick = () => openPlan(key);
+    calendarDays.appendChild(cell);
   }
 }
 
 function renderPlans() {
-  plansList.innerHTML = "";
-  const keys = Object.keys(plans).sort((a, b) => new Date(a) - new Date(b));
-  plansList.innerHTML = keys.length
-    ? keys.map(k => `<div onclick="openPlan('${k}')" class="cursor-pointer hover:underline">${k}: ${plans[k]}</div>`).join("")
+  plansList.innerHTML = Object.keys(plans).length
+    ? Object.entries(plans).map(([k, v]) =>
+        `<div class="cursor-pointer hover:underline" onclick="openPlan('${k}')">${k}: ${v}</div>`
+      ).join("")
     : `<p class="italic text-gray-400">No plans yet</p>`;
 }
 
@@ -285,53 +310,11 @@ deletePlan.onclick = () => {
 prevMonth.onclick = () => { schedDate.setMonth(schedDate.getMonth() - 1); renderCalendar(); };
 nextMonth.onclick = () => { schedDate.setMonth(schedDate.getMonth() + 1); renderCalendar(); };
 
-//=================NEWS==================
-async function loadNews() {
-  const res = await fetch(`${API}/news`);
-  const news = await res.json();
+/* ===================== LOGOUT ===================== */
+function logout() {
+  localStorage.clear();
+  window.location.href = "login.html";
 }
-
-// ================== LOGIN ==================
-localStorage.setItem("token", data.token);
-localStorage.setItem("user", JSON.stringify(data.user));
-localStorage.setItem("isLoggedIn", "true");
-
-
-// ================== PROFILE DROPDOWN ==================
-  const userName = document.getElementById("userName");
-  const userAvatar = document.getElementById("userAvatar");
-
-  const name = localStorage.getItem("userName") || "Student";
-  userName.textContent = name;
-
-  userAvatar.style.backgroundImage = "url('https://i.pravatar.cc/40')";
-  userAvatar.style.backgroundSize = "cover";
-
-  const dropdown = document.createElement("div");
-  dropdown.id = "profileMenu";
-  dropdown.className =
-    "absolute right-4 top-14 bg-[#3E3B59] text-[#F2F0E5] rounded-lg shadow-lg hidden";
-  dropdown.innerHTML = `
-    <button id="viewProfile" class="block w-full text-left px-4 py-2 hover:bg-[#4E4A69]">View Profile</button>
-    <button id="logoutBtn2" class="block w-full text-left px-4 py-2 hover:bg-[#4E4A69]">Logout</button>
-  `;
-  document.body.appendChild(dropdown);
-
-  userAvatar.addEventListener("click", () =>
-    dropdown.classList.toggle("hidden")
-  );
-  document.addEventListener("click", e => {
-  if (!userAvatar.contains(e.target) && !dropdown.contains(e.target)) {
-    dropdown.classList.add("hidden");
-  }
-});
-
-document.getElementById("logoutBtn2").onclick = logout;
-
-  function logout() {
-    localStorage.removeItem("isLoggedIn");
-    window.location.href = "login.html"; 
-  }
 
 // ================== INIT ==================
 (async function init() {
@@ -339,5 +322,4 @@ document.getElementById("logoutBtn2").onclick = logout;
   highlightNav(document.querySelector('[data-page="dashboard"]'));
   await showPage("dashboard");
 })();
-
 
