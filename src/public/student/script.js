@@ -1,325 +1,388 @@
-/* ===================== CONFIG ===================== */
-const API = "http://localhost:3000/api";
+document.addEventListener("DOMContentLoaded", () => {
+  // ---------- Helpers ----------
+  const qs = (s) => document.querySelector(s);
+  const qsa = (s) => Array.from(document.querySelectorAll(s));
 
-/* ===================== AUTH ===================== */
-const user = JSON.parse(localStorage.getItem("user"));
-const USER_ID = user?.id;
+  function escapeHtml(str) {
+    return String(str ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
 
-if (!USER_ID) {
-  window.location.href = "login.html";
-}
+  function initials(name) {
+    const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+    const a = parts[0]?.[0] || "S";
+    const b = parts[1]?.[0] || "";
+    return (a + b).toUpperCase();
+  }
 
-/* ===================== ELEMENTS ===================== */
-const yearSpan = document.getElementById("y");
-const sidebar = document.getElementById("sidebar");
-const menuBtn = document.getElementById("menuBtn");
-const overlay = document.getElementById("overlay");
-const menuLinks = document.querySelectorAll("nav a");
-const pages = document.querySelectorAll(".page-section");
+  async function safeJson(res) {
+    try { return await res.json(); } catch { return null; }
+  }
 
-const userName = document.getElementById("userName");
-const userAvatar = document.getElementById("userAvatar");
+  function isSameDay(a, b) {
+    return a.getFullYear() === b.getFullYear() &&
+           a.getMonth() === b.getMonth() &&
+           a.getDate() === b.getDate();
+  }
 
-/* Schedule */
-const monthYear = document.getElementById("monthYear");
-const calendarDays = document.getElementById("calendarDays");
-const plansList = document.getElementById("plansList");
-const planModal = document.getElementById("planModal");
-const modalDate = document.getElementById("modalDate");
-const planInput = document.getElementById("planInput");
-const savePlan = document.getElementById("savePlan");
-const deletePlan = document.getElementById("deletePlan");
-const prevMonth = document.getElementById("prevMonth");
-const nextMonth = document.getElementById("nextMonth");
+  // ---------- UI: name + avatar + logout ----------
+  const userNameEl = qs("#userName");
+  const avatarEl = qs("#userAvatar");
+  const name = localStorage.getItem("userName") || "Student";
+  const avatarData = localStorage.getItem("userAvatar") || "";
 
-/* ===================== STATE ===================== */
-let courses = [];
-let schedDate = new Date();
-let activeDate = null;
-const plans = JSON.parse(localStorage.getItem("plans") || "{}");
+  function renderTopbarAvatar() {
+    const name = localStorage.getItem("userName") || "Student";
+    const avatarData = localStorage.getItem("userAvatar") || "";
+    if (avatarData) {
+      avatarEl.style.backgroundImage = `url(${avatarData})`;
+      avatarEl.style.backgroundSize = "cover";
+      avatarEl.textContent = "";
+    } else {
+      avatarEl.style.backgroundImage = "";
+      avatarEl.textContent = initials(name);
+    }
+  }
 
-/* ===================== INIT ===================== */
-yearSpan.textContent = new Date().getFullYear();
-userName.textContent = user.name || "Student";
-userAvatar.style.backgroundImage = "url('https://i.pravatar.cc/40')";
-userAvatar.style.backgroundSize = "cover";
+  if (userNameEl) userNameEl.textContent = name;
+  renderTopbarAvatar();
 
-/* ===================== SIDEBAR ===================== */
-menuBtn?.addEventListener("click", toggleSidebar);
-overlay?.addEventListener("click", closeSidebar);
+  function logout() {
+    localStorage.removeItem("isLoggedIn");
+    localStorage.removeItem("role");
+    localStorage.removeItem("userName");
+    localStorage.removeItem("userAvatar");
+    window.location.replace(LOGIN_PATH);
+  }
 
-function toggleSidebar() {
-  sidebar.classList.toggle("-translate-x-full");
-  overlay.classList.toggle("hidden");
-}
-
-function closeSidebar() {
-  sidebar.classList.add("-translate-x-full");
-  overlay.classList.add("hidden");
-}
-
-/* ===================== NAVIGATION ===================== */
-menuLinks.forEach(link => {
-  link.addEventListener("click", async e => {
+  qs("#logoutBtn")?.addEventListener("click", logout);
+  qs("#sidebarLogout")?.addEventListener("click", (e) => {
     e.preventDefault();
-    const page = link.dataset.page;
-    highlightNav(link);
-    closeSidebar();
-    await showPage(page);
+    logout();
   });
+
+  // Profile dropdown
+  const topWrap = qs("#topAvatarWrap");
+  const profileMenu = qs("#profileMenu");
+  avatarEl?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    profileMenu?.classList.toggle("hidden");
+  });
+  document.addEventListener("click", (e) => {
+    if (!topWrap || !profileMenu) return;
+    if (!topWrap.contains(e.target)) profileMenu.classList.add("hidden");
+  });
+
+  // ---------- Sidebar mobile toggle ----------
+  const sidebar = qs("#sidebar");
+  const overlay = qs("#overlay");
+  const menuBtn = qs("#menuBtn");
+
+  function closeSidebar() {
+    sidebar?.classList.add("-translate-x-full");
+    overlay?.classList.add("hidden");
+    document.body.style.overflow = "";
+  }
+
+  function toggleSidebar() {
+    if (!sidebar || !overlay) return;
+    const closed = sidebar.classList.contains("-translate-x-full");
+    if (closed) {
+      sidebar.classList.remove("-translate-x-full");
+      overlay.classList.remove("hidden");
+      document.body.style.overflow = "hidden";
+    } else {
+      closeSidebar();
+    }
+  }
+
+  menuBtn?.addEventListener("click", toggleSidebar);
+  overlay?.addEventListener("click", closeSidebar);
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      closeSidebar();
+      qs("#notifMenu")?.classList.add("hidden");
+      profileMenu?.classList.add("hidden");
+    }
+  });
+
+  // ---------- Navigation ----------
+  const pages = qsa(".page-section");
+  const navItems = qsa(".nav-item");
+
+  function showPage(id) {
+    pages.forEach((p) => p.classList.add("hidden"));
+    qs(`#${id}`)?.classList.remove("hidden");
+
+    navItems.forEach((i) => i.classList.remove("active"));
+    navItems.find((i) => i.dataset.page === id)?.classList.add("active");
+
+    closeSidebar();
+
+    if (id === "dashboard") renderDashboard();
+    if (id === "courses") renderCoursesPage();
+    if (id === "assignments") renderAssignmentsPage();
+    if (id === "schedule") renderSchedulePage();
+  }
+
+  navItems.forEach((it) => {
+    it.addEventListener("click", (e) => {
+      e.preventDefault();
+      const page = it.dataset.page;
+      if (page) showPage(page);
+    });
+  });
+
+// Profile dropdown navigation
+const profileModal = qs("#profileModal");
+const profileBackdrop = qs("#profileBackdrop");
+const closeProfileModal = qs("#closeProfileModal");
+
+function openProfileModal() {
+  loadProfile();
+  profileModal.classList.remove("hidden");
+  profileModal.classList.add("flex");
+  document.body.style.overflow = "hidden";
+}
+
+function closeProfile() {
+  profileModal.classList.add("hidden");
+  profileModal.classList.remove("flex");
+  document.body.style.overflow = "";
+}
+
+profileBtn?.addEventListener("click", (e) => {
+  e.preventDefault();
+  profileMenu?.classList.add("hidden");
+  openProfileModal();
 });
 
-function highlightNav(active) {
-  menuLinks.forEach(l => l.classList.remove("bg-[#1C1820]", "text-white"));
-  active.classList.add("bg-[#1C1820]", "text-white");
-}
+closeProfileModal?.addEventListener("click", closeProfile);
+profileBackdrop?.addEventListener("click", closeProfile);
 
-async function showPage(id) {
-  pages.forEach(p => p.classList.add("hidden"));
-  document.getElementById(id)?.classList.remove("hidden");
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeProfile();
+});
 
-  if (id === "dashboard") await loadDashboard();
-  if (id === "courses") await loadMyCourses();
-  if (id === "enroll") await loadEnroll();
-  if (id === "assignments") await loadAssignments();
-  if (id === "schedule") loadSchedule();
-}
+// ---------- Profile Page ----------
+  const profileAvatar = qs("#profileAvatar");
+  const profileNameInput = qs("#profileNameInput");
+  const profilePhotoInput = qs("#profilePhotoInput");
+  const removeAvatarBtn = qs("#removeAvatarBtn");
+  const saveProfileBtn = qs("#saveProfileBtn");
 
-/* ===================== DATA ===================== */
-async function loadCourses() {
-  const res = await fetch(`${API}/courses`);
-  courses = await res.json();
-}
+  function loadProfile() {
+    const name = localStorage.getItem("userName") || "Student";
+    const avatarData = localStorage.getItem("userAvatar") || "";
+    profileNameInput.value = name;
 
-/* ===================== DASHBOARD ===================== */
-async function loadDashboard() {
-  const res = await fetch(`${API}/my-courses/${USER_ID}`);
-  const myCourses = await res.json();
-
-  document.getElementById("activeCoursesCount").textContent = myCourses.length;
-  document.getElementById("totalCoursesCount").textContent = courses.length;
-
-  const container = document.getElementById("continueCourses");
-  container.innerHTML = "";
-
-  if (!myCourses.length) {
-    container.innerHTML = `<p class="italic text-gray-500">No courses yet.</p>`;
-    return;
-  }
-
-  myCourses.slice(0, 2).forEach(course => {
-    const card = document.createElement("div");
-    card.className = "bg-white p-4 rounded-xl shadow";
-    card.innerHTML = `
-      <h4 class="font-semibold">${course.title}</h4>
-      <p class="text-sm text-gray-600">${course.description}</p>
-    `;
-    container.appendChild(card);
-  });
-}
-
-/* ===================== COURSES ===================== */
-function createCourseCard(course, enrolled) {
-  const card = document.createElement("div");
-  card.className = "bg-white p-4 rounded-xl shadow";
-
-  const btn = document.createElement("button");
-  btn.textContent = enrolled ? "Unenroll" : "Enroll";
-  btn.className = "mt-3 px-3 py-1 border rounded";
-
-  btn.onclick = async () => {
-    if (enrolled) {
-      await unenrollCourse(course.id);
+    if (avatarData) {
+      profileAvatar.style.backgroundImage = `url(${avatarData})`;
+      profileAvatar.style.backgroundSize = "cover";
+      profileAvatar.textContent = "";
     } else {
-      await enrollCourse(course.id);
+      profileAvatar.style.backgroundImage = "";
+      profileAvatar.textContent = initials(name);
     }
-  };
-
-  card.innerHTML = `
-    <h3 class="font-semibold">${course.title}</h3>
-    <p class="text-sm text-gray-600">${course.description}</p>
-  `;
-  card.appendChild(btn);
-
-  return card;
-}
-
-async function loadMyCourses() {
-  const section = document.getElementById("courses");
-  const res = await fetch(`${API}/my-courses/${USER_ID}`);
-  const myCourses = await res.json();
-
-  section.innerHTML = `
-    <section class="content-box">
-      <h2 class="text-xl font-semibold mb-4">My Courses</h2>
-      <div id="myCoursesList" class="grid md:grid-cols-2 gap-4"></div>
-    </section>
-  `;
-
-  const list = document.getElementById("myCoursesList");
-  myCourses.forEach(c => list.appendChild(createCourseCard(c, true)));
-}
-
-async function loadEnroll() {
-  const section = document.getElementById("enroll");
-  const res = await fetch(`${API}/my-courses/${USER_ID}`);
-  const myCourses = await res.json();
-  const myIds = new Set(myCourses.map(c => c.id));
-
-  section.innerHTML = `
-    <section class="content-box">
-      <h2 class="text-xl font-semibold mb-4">Enroll in Courses</h2>
-      <div id="enrollCoursesList" class="grid md:grid-cols-2 gap-4"></div>
-    </section>
-  `;
-
-  const list = document.getElementById("enrollCoursesList");
-  courses.filter(c => !myIds.has(c.id))
-    .forEach(c => list.appendChild(createCourseCard(c, false)));
-}
-
-async function enrollCourse(courseId) {
-  await fetch(`${API}/enroll`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userId: USER_ID, courseId })
-  });
-  await loadMyCourses();
-  await loadEnroll();
-}
-
-async function unenrollCourse(courseId) {
-  await fetch(`${API}/unenroll`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userId: USER_ID, courseId })
-  });
-  await loadMyCourses();
-  await loadEnroll();
-}
-
-/* ===================== ASSIGNMENTS ===================== */
-async function loadAssignments() {
-  const res = await fetch(`${API}/assignments`);
-  const assignments = await res.json();
-  const list = document.getElementById("assignmentsList");
-
-  list.innerHTML = assignments.length
-    ? assignments.map(a => `
-      <div class="bg-white p-4 rounded shadow">
-        <h3 class="font-semibold">${a.title}</h3>
-        <p class="text-sm">${a.description}</p>
-      </div>
-    `).join("")
-    : `<p class="italic text-gray-500">No assignments.</p>`;
-}
-
-const section = document.getElementById("assignments");
-  section.innerHTML = `
-    <section class="content-box">
-      <h2 class="text-xl font-semibold mb-4">Assignments</h2>
-      <div id="assignmentsList" class="space-y-4"></div>
-    </section>
-  `;    
-  assignments.forEach(a => {
-    const div = document.createElement("div");
-    div.className = "p-4 border rounded"; 
-    div.innerHTML = `
-      <h3 class="font-semibold">${a.title}</h3>
-      <p>${a.description}</p>   
-      <button onclick="submitAssignment(${a.id})" class="mt-2 px-4 py-2 bg-blue-500 text-white rounded">Submit</button>
-    `;
-    document.getElementById("assignmentsList").appendChild(div);
-  });       
-async function submitAssignment(assignmentId) {
-  const content = prompt("Enter your assignment submission:");
-  if (!content) return; 
-  await fetch(`${API}/submit-assignment`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userId: USER_ID, assignmentId, content })
-  });
-  alert("Assignment submitted successfully!");
-}
-
-
-/* ===================== SCHEDULE ===================== */
-function loadSchedule() {
-  renderCalendar();
-  renderPlans();
-}
-
-function renderCalendar() {
-  const y = schedDate.getFullYear();
-  const m = schedDate.getMonth();
-  const first = new Date(y, m, 1).getDay();
-  const days = new Date(y, m + 1, 0).getDate();
-
-  monthYear.textContent = schedDate.toLocaleString("default", { month: "long", year: "numeric" });
-  calendarDays.innerHTML = "";
-
-  for (let i = 0; i < first; i++) calendarDays.appendChild(document.createElement("div"));
-
-  for (let d = 1; d <= days; d++) {
-    const key = new Date(y, m, d).toISOString().split("T")[0];
-    const cell = document.createElement("div");
-
-    cell.textContent = d;
-    cell.className = "p-2 text-sm rounded cursor-pointer text-center hover:bg-gray-100";
-    if (plans[key]) cell.classList.add("bg-blue-100");
-
-    cell.onclick = () => openPlan(key);
-    calendarDays.appendChild(cell);
   }
-}
 
-function renderPlans() {
-  plansList.innerHTML = Object.keys(plans).length
-    ? Object.entries(plans).map(([k, v]) =>
-        `<div class="cursor-pointer hover:underline" onclick="openPlan('${k}')">${k}: ${v}</div>`
-      ).join("")
-    : `<p class="italic text-gray-400">No plans yet</p>`;
-}
+  profilePhotoInput?.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
-function openPlan(date) {
-  activeDate = date;
-  modalDate.textContent = date;
-  planInput.value = plans[date] || "";
-  planModal.classList.remove("hidden");
-}
+    const reader = new FileReader();
+    reader.onload = function(event) {
+      localStorage.setItem("userAvatar", event.target.result);
+      loadProfile();
+      renderTopbarAvatar();
+    };
+    reader.readAsDataURL(file);
+  });
 
-savePlan.onclick = () => {
-  planInput.value.trim()
-    ? plans[activeDate] = planInput.value.trim()
-    : delete plans[activeDate];
+  removeAvatarBtn?.addEventListener("click", () => {
+    localStorage.removeItem("userAvatar");
+    loadProfile();
+    renderTopbarAvatar();
+  });
 
-  localStorage.setItem("plans", JSON.stringify(plans));
-  planModal.classList.add("hidden");
-  renderCalendar();
-  renderPlans();
-};
+  saveProfileBtn?.addEventListener("click", () => {
+    const newName = profileNameInput.value.trim() || "Student";
+    localStorage.setItem("userName", newName);
+    loadProfile();
+    renderTopbarAvatar();
+    userNameEl.textContent = newName;
+    alert("Profile updated!");
+  });
 
-deletePlan.onclick = () => {
-  delete plans[activeDate];
-  localStorage.setItem("plans", JSON.stringify(plans));
-  planModal.classList.add("hidden");
-  renderCalendar();
-  renderPlans();
-};
+  // ---------- Cards ----------
+  const continueCourses = qs("#continueCourses");
+  const coursesGridFull = qs("#coursesGridFull");
+  const assignmentsList = qs("#assignmentsList");
+  const activeCoursesCount = qs("#activeCoursesCount");
+  const homeworkCount = qs("#homeworkCount");
 
-prevMonth.onclick = () => { schedDate.setMonth(schedDate.getMonth() - 1); renderCalendar(); };
-nextMonth.onclick = () => { schedDate.setMonth(schedDate.getMonth() + 1); renderCalendar(); };
+  function courseCard(c) {
+    const title = escapeHtml(c.title);
+    const desc = escapeHtml(c.description || "");
+    return `
+      <div class="card">
+        <h4 class="font-semibold leading-tight">${title}</h4>
+        <p class="text-sm opacity-80 mt-1">${desc}</p>
+        <div class="mt-3 w-full bg-black/10 rounded-full h-2.5">
+          <div class="h-2.5 rounded-full bg-black/50" style="width: 0%"></div>
+        </div>
+        <p class="text-xs opacity-70 mt-2">0% Complete</p>
+        <button class="mt-4 w-full rounded-xl bg-white/70 hover:bg-white text-[var(--text-dark)] font-semibold py-2 transition border border-black/10">
+          Continue
+        </button>
+      </div>
+    `;
+  }
 
-/* ===================== LOGOUT ===================== */
-function logout() {
-  localStorage.clear();
-  window.location.href = "login.html";
-}
+  function homeworkCard(h) {
+    const title = escapeHtml(h.title);
+    const desc = escapeHtml(h.description || "");
+    const by = escapeHtml(h.submitted_by || "N/A");
+    const course = escapeHtml(h.course || "N/A");
+    return `
+      <div class="card">
+        <h4 class="font-semibold leading-tight">${title}</h4>
+        <p class="text-sm opacity-80 mt-1">${desc}</p>
+        <p class="text-xs opacity-70 mt-3">Course: ${course} · By: ${by}</p>
+        <button class="mt-4 w-full rounded-xl bg-white/70 hover:bg-white text-[var(--text-dark)] font-semibold py-2 transition border border-black/10">
+          View
+        </button>
+      </div>
+    `;
+  }
 
-// ================== INIT ==================
-(async function init() {
-  await loadCourses();
-  highlightNav(document.querySelector('[data-page="dashboard"]'));
-  await showPage("dashboard");
-})();
+  // ---------- Data ----------
+  let cacheCourses = [];
+  let cacheHomework = [];
+  async function loadAll(force = false) {
+    if (!force && cacheCourses.length && cacheHomework.length) return;
+    try {
+      const [coursesRes, hwRes] = await Promise.all([
+        fetch(`${API}/courses`),
+        fetch(`${API}/homework`),
+      ]);
+      cacheCourses = (await safeJson(coursesRes)) || [];
+      cacheHomework = (await safeJson(hwRes)) || [];
+      if (activeCoursesCount) activeCoursesCount.textContent = cacheCourses.length;
+      if (homeworkCount) homeworkCount.textContent = cacheHomework.length;
+    } catch {
+      cacheCourses = [];
+      cacheHomework = [];
+      if (activeCoursesCount) activeCoursesCount.textContent = "0";
+      if (homeworkCount) homeworkCount.textContent = "0";
+    }
+  }
+
+  // ---------- Schedule ----------
+  let cacheSchedule = [];
+  async function loadSchedule(force = false) {
+    if (!force && cacheSchedule.length) return;
+    const username = localStorage.getItem("username") || "";
+    const role = localStorage.getItem("role") || "student";
+    if (!username) {
+      cacheSchedule = [];
+      return;
+    }
+    try {
+      const res = await fetch(`${API}/schedule?role=${encodeURIComponent(role)}&username=${encodeURIComponent(username)}`);
+      const out = await safeJson(res);
+      cacheSchedule = out?.items || [];
+    } catch (e) {
+      console.error(e);
+      cacheSchedule = [];
+    }
+  }
+
+  function scheduleRow(ev) {
+    const title = escapeHtml(ev.title || "Event");
+    const course = escapeHtml(ev.course || "");
+    const location = escapeHtml(ev.location || "");
+    const notes = escapeHtml(ev.notes || "");
+    const start = new Date(ev.start);
+    const end = new Date(ev.end);
+    const time = `${start.toLocaleString()}${isNaN(end.getTime()) ? "" : " – " + end.toLocaleTimeString()}`;
+    return `
+      <div class="p-3 rounded-xl border border-black/10 bg-white/70">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <div class="font-semibold">${title}</div>
+            <div class="text-xs opacity-70 mt-1">${time}</div>
+            ${course ? `<div class="text-xs opacity-70 mt-1">Course: ${course}</div>` : ""}
+            ${location ? `<div class="text-xs opacity-70 mt-1">Location: ${location}</div>` : ""}
+            ${notes ? `<div class="text-xs opacity-70 mt-1">${notes}</div>` : ""}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  async function renderSchedulePage() {
+    await loadSchedule();
+    const todayBox = qs("#scheduleToday");
+    const upcomingBox = qs("#scheduleUpcoming");
+    const empty = qs("#scheduleEmpty");
+    if (!todayBox || !upcomingBox || !empty) return;
+
+    const now = new Date();
+    const items = cacheSchedule.filter(e => e?.start).sort((a,b)=>new Date(a.start)-new Date(b.start));
+    const today = items.filter(e => isSameDay(new Date(e.start), now));
+    const upcoming = items.filter(e => new Date(e.start) > now).slice(0,20);
+
+    todayBox.innerHTML = today.length ? today.map(scheduleRow).join("") : `<div class="text-sm opacity-70">No events today.</div>`;
+    upcomingBox.innerHTML = upcoming.length ? upcoming.map(scheduleRow).join("") : `<div class="text-sm opacity-70">No upcoming events.</div>`;
+    empty.classList.toggle("hidden", items.length !== 0);
+  }
+
+  // ---------- Render ----------
+  async function renderDashboard() { await loadAll(); if(continueCourses) continueCourses.innerHTML = cacheCourses.slice(0,4).map(courseCard).join(""); }
+  async function renderCoursesPage() { await loadAll(); if(coursesGridFull) coursesGridFull.innerHTML = cacheCourses.map(courseCard).join(""); }
+  async function renderAssignmentsPage() { await loadAll(); if(assignmentsList) assignmentsList.innerHTML = cacheHomework.map(homeworkCard).join(""); }
+
+  // ---------- Notifications ----------
+  function setupNotificationsUI() {
+    const btn = qs("#notifBtn");
+    const menu = qs("#notifMenu");
+    const wrap = qs("#notifWrap");
+    btn?.addEventListener("click", async (e)=>{ e.stopPropagation(); menu?.classList.toggle("hidden"); if(menu&&!menu.classList.contains("hidden")) await loadNotifications(); });
+    document.addEventListener("click",(e)=>{ if(!wrap||!menu) return; if(!wrap.contains(e.target)) menu.classList.add("hidden"); });
+    qs("#notifReadAll")?.addEventListener("click", async (e)=>{ e.stopPropagation(); const role = localStorage.getItem("role")||""; const username=localStorage.getItem("username")||""; await fetch(`${API}/notifications/read-all`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({role,username})}); await loadNotifications(); });
+  }
+  async function loadNotifications() {
+    const role = localStorage.getItem("role")||"";
+    const username = localStorage.getItem("username")||"";
+    if(!username) return;
+    const res = await fetch(`${API}/notifications?role=${encodeURIComponent(role)}&username=${encodeURIComponent(username)}`);
+    const out = await safeJson(res);
+    if(!out?.success) return;
+    const items = out.items||[];
+    const unreadCount = items.filter(x=>x.unread).length;
+    const badge = qs("#notifBadge");
+    if(badge){ badge.textContent = String(unreadCount); badge.classList.toggle("hidden", unreadCount===0);}
+    const list = qs("#notifList");
+    if(!list) return;
+    list.innerHTML = items.map(n=>`<div class="px-4 py-3 border-b border-black/5 ${n.unread?"bg-green-50":""}"><div class="text-sm font-semibold">${escapeHtml(n.message||"")}</div><div class="text-xs opacity-70 mt-1">${escapeHtml(n.byName||n.byUsername||"Someone")} · ${escapeHtml(n.byRole||"")} · ${new Date(n.ts).toLocaleString()}</div></div>`).join("");
+  }
+
+  // ---------- Boot ----------
+  qs("#y") && (qs("#y").textContent = new Date().getFullYear());
+  setupNotificationsUI();
+  loadNotifications();
+  setInterval(loadNotifications,15000);
+  showPage("dashboard");
+
+  // Refresh buttons
+  qs("#refreshCoursesBtn")?.addEventListener("click", ()=>loadAll(true).then(renderCoursesPage));
+  qs("#refreshAssignmentsBtn")?.addEventListener("click", ()=>loadAll(true).then(renderAssignmentsPage));
+  qs("#refreshScheduleBtn")?.addEventListener("click", ()=>loadSchedule(true).then(renderSchedulePage));
+});
 
